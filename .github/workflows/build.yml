@@ -1,0 +1,60 @@
+name: Build Mod
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: ["*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Generate Gradle wrapper
+        run: |
+          # gradle-wrapper.jar is not shipped in the repo — download it from the
+          # official Fabric Example Mod so the build works out of the box.
+          curl -sL -o gradle/wrapper/gradle-wrapper.jar \
+            "https://github.com/FabricMC/fabric-example-mod/raw/1.20/gradle/wrapper/gradle-wrapper.jar"
+          chmod +x gradlew
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('gradle.properties', 'build.gradle', 'settings.gradle') }}
+          restore-keys: gradle-${{ runner.os }}-
+
+      - name: Build
+        run: ./gradlew build --no-daemon
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: mythic-metals-addon-jar
+          path: build/libs/*.jar
+          if-no-files-found: error
+
+      - name: Upload ZIP (whole project + build output)
+        uses: actions/upload-artifact@v4
+        with:
+          name: mythic-metals-addon-full
+          path: |
+            .
+            !/.git
+            !/.github
+            !build/loom-cache
+            !build/loom-remappedJars
+            !build/loom-mappings
