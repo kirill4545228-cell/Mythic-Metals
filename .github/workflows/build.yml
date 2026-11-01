@@ -1,9 +1,7 @@
-name: Build Mod
+name: Build Mod from ZIP
 
 on:
   push:
-    branches: ["*"]
-  pull_request:
     branches: ["*"]
   workflow_dispatch:
 
@@ -20,13 +18,40 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Generate Gradle wrapper
+      - name: Find project ZIP
+        id: findzip
         run: |
-          # gradle-wrapper.jar is not shipped in the repo — download it from the
-          # official Fabric Example Mod so the build works out of the box.
-          curl -sL -o gradle/wrapper/gradle-wrapper.jar \
-            "https://github.com/FabricMC/fabric-example-mod/raw/1.20/gradle/wrapper/gradle-wrapper.jar"
-          chmod +x gradlew
+          # Look for any .zip in the repo root
+          ZIP=$(find . -maxdepth 1 -name "*.zip" | head -1)
+          if [ -z "$ZIP" ]; then
+            echo "No .zip file found in repo root!"
+            exit 1
+          fi
+          echo "Found: $ZIP"
+          echo "zip=$ZIP" >> "$GITHUB_OUTPUT"
+
+      - name: Unzip project
+        run: |
+          ZIP="${{ steps.findzip.outputs.zip }}"
+          # Unzip into a temp dir to detect structure
+          mkdir -p /tmp/unzipped
+          unzip -q -o "$ZIP" -d /tmp/unzipped
+          # Check if contents are nested under a single folder
+          SUBDIR=$(find /tmp/unzipped -maxdepth 1 -type d ! -path /tmp/unzipped | head -1)
+          if [ -n "$SUBDIR" ] && [ "$(find /tmp/unzipped -maxdepth 1 -type f | wc -l)" -eq 0 ]; then
+            echo "Nested folder detected: $SUBDIR"
+            cp -a "$SUBDIR"/. .
+          else
+            echo "Flat structure"
+            cp -a /tmp/unzipped/. .
+          fi
+          echo "--- Files after unzip ---"
+          ls -la
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -38,7 +63,7 @@ jobs:
           restore-keys: gradle-${{ runner.os }}-
 
       - name: Build
-        run: ./gradlew build --no-daemon
+        run: gradle build --no-daemon
 
       - name: Upload JAR
         uses: actions/upload-artifact@v4
@@ -47,14 +72,14 @@ jobs:
           path: build/libs/*.jar
           if-no-files-found: error
 
-      - name: Upload ZIP (whole project + build output)
+      - name: Upload full project ZIP
         uses: actions/upload-artifact@v4
         with:
           name: mythic-metals-addon-full
           path: |
-            .
-            !/.git
-            !/.github
-            !build/loom-cache
-            !build/loom-remappedJars
-            !build/loom-mappings
+            build/libs/*.jar
+            src/
+            build.gradle
+            settings.gradle
+            gradle.properties
+            README.md
